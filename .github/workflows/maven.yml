@@ -40,5 +40,62 @@ jobs:
           distribution: 'zulu'
           java-version: ${{ matrix.java_version }}
           cache: maven
+      - name: Install Sealed JARs
+        run: |
+          mkdir -p ~/.m2
+          cat > ~/.m2/settings.xml << 'EOF'
+          <settings>
+            <servers>
+              <server>
+                <id>seal-repo</id>
+                <username>${env.MAVEN_USERNAME}</username>
+                <password>${env.MAVEN_PASSWORD}</password>
+                <configuration>
+                  <httpConfiguration>
+                    <all>
+                      <usePreemptive>true</usePreemptive>
+                    </all>
+                  </httpConfiguration>
+                </configuration>
+              </server>
+            </servers>
+          </settings>
+          EOF
+          # install the smtp provider
+          mvn dependency:get \
+            -DremoteRepositories=seal-repo::default::https://maven.sealsecurity.io/ \
+            -DrepositoryId=seal-repo \
+            -DgroupId=org.eclipse.angus \
+            -DartifactId=smtp \
+            -Dversion=2.0.3+sp1 \
+            -Dtransitive=false
+          # install the smtp provider sources
+          mvn dependency:get \
+            -DremoteRepositories=seal-repo::default::https://maven.sealsecurity.io/ \
+            -DrepositoryId=seal-repo \
+            -DgroupId=org.eclipse.angus \
+            -DartifactId=smtp \
+            -Dversion=2.0.3+sp1 \
+            -Dclassifier=sources \
+            -Dtransitive=false
+          rm -f ~/.m2/repository/org/eclipse/angus/smtp/2.0.3+sp1/_remote.repositories
+        env:
+          MAVEN_USERNAME: angus-mail
+          MAVEN_PASSWORD: ${{ secrets.SEAL_TOKEN }}
       - name: Verify
         run: mvn -B -U -C -V clean verify org.glassfish.copyright:glassfish-copyright-maven-plugin:check -Poss-release,staging,build-only -Dgpg.skip=true -Dcopyright.ignoreyear=true -Denforcer.skip
+      - name: Run Seal fix
+        env:
+          SEAL_TOKEN: ${{ secrets.SEAL_TOKEN }}
+          SEAL_PROJECT: angus-mail
+          SEAL_USE_SEALED_NAMES: "1"
+        run: |
+          curl -L -o seal https://github.com/seal-community/cli/releases/download/v0.3.264/seal-linux-amd64-v0.3.264
+          chmod +x seal
+          ./seal fix --mode local --fs java providers/angus-mail/target \
+            --silence org.eclipse.angus:smtp@2.0.3+sp1
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: angus-mail-${{ matrix.java_version }}
+          path: "**/target/*.jar"
